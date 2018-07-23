@@ -44,9 +44,18 @@
   (let ((command (format "%s ls gs://%s" gcloud-gsutil-command dir)))
     (shell-command-to-string command)))
 
+(defun gcloud-gsutil-cat (entry)
+  "Get contents in `ENTRY'."
+  (let ((command (format "%s cat gs://%s" gcloud-gsutil-command entry)))
+    (shell-command-to-string command)))
+
 (defun gcloud-gcs-get-dir (dir)
   "Return the actual directory given `DIR'."
   (s-chop-prefix "gs://" dir))
+
+(defun gcloud-gcs-entry-is-directory (entry)
+  "Return non-nil if `ENTRY' is a directory."
+  (equal (aref entry (- (length entry) 1)) ?/))
 
 (defun gcloud-gcs-lines-parse (line)
   "Convert a LINE from `gsutil ls' to a `tabulated-list-entries' entry."
@@ -56,7 +65,7 @@
     (list dir (vector file-or-folder-name))))
 
 (defun gcloud-gcs-get-entries (dir &optional refresh)
-  "Returns the items in google cloud storage for `tabulated-list-entries'."
+  "Returns the items in `DIR' for `tabulated-list-entries'."
   (let* ((data (if (or refresh
                        (not (gethash dir gcloud-gcs-cache)))
                    (progn
@@ -91,12 +100,29 @@
         (gcloud-gcs-get-entries gcloud-current-directory t))
   (tabulated-list-revert))
 
-(defun gcloud-gcs-select-directory ()
-  "Update the selected gcloud directory to current entry."
+(defun gcloud-gcs-select-file-or-directory ()
+  "Open the file at entry, or the directory."
   (interactive)
-  (let* ((dir (tabulated-list-get-id)))
-    (setq gcloud-current-directory dir)
-    (gcloud-gcs-entries-refresh)))
+  (let ((entry (tabulated-list-get-id)))
+    (if (gcloud-gcs-entry-is-directory entry)
+        (gcloud-gcs-select-directory entry)
+      (gcloud-gcs-open-file entry))))
+
+(defun gcloud-gcs-open-file (entry)
+  "Open the file at `ENTRY'."
+  (interactive)
+  (let* ((buffer-name (file-name-nondirectory entry))
+         (buffer (generate-new-buffer buffer-name))
+         (contents (gcloud-gsutil-cat entry)))
+    (with-current-buffer buffer
+      (insert contents)
+      (beginning-of-buffer))
+    (pop-to-buffer buffer)))
+
+(defun gcloud-gcs-select-directory (dir)
+  "Update the selected gcloud directory to `DIR'."
+  (setq gcloud-current-directory dir)
+  (gcloud-gcs-entries-refresh))
 
 (defun gcloud-gcs-parent-directory ()
   "Update the selected gloud directory to parent directory."
@@ -128,13 +154,21 @@ POS, if omitted or nil, defaults to point."
 
 (defvar gcloud-gcs-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "<return>") 'gcloud-gcs-select-directory)
+    (define-key map (kbd "<return>") 'gcloud-gcs-select-file-or-directory)
     (define-key map (kbd "G") 'gcloud-gcs-entries-reload)
     (define-key map (kbd "w") 'gcloud-gcs-add-to-killring)
     (define-key map (kbd "^") 'gcloud-gcs-parent-directory)
     (define-key map (kbd "s") 'gcloud-gcs-save-cache)
     map)
   "Keymap for `gcloud-gcs-mode'")
+
+(setq gcloud-gcs-mode-map (let ((map (make-sparse-keymap)))
+                            (define-key map (kbd "<return>") 'gcloud-gcs-select-file-or-directory)
+                            (define-key map (kbd "G") 'gcloud-gcs-entries-reload)
+                            (define-key map (kbd "w") 'gcloud-gcs-add-to-killring)
+                            (define-key map (kbd "^") 'gcloud-gcs-parent-directory)
+                            (define-key map (kbd "s") 'gcloud-gcs-save-cache)
+                            map))
 
 (define-derived-mode gcloud-gcs-mode tabulated-list-mode "GCS"
   "Major mode for handling GCS entries."
