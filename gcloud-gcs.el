@@ -24,7 +24,7 @@
 ;;; Code:
 
 (require 'gcloud-utils)
-(require 'tablist)
+(require 'tabulated-list)
 
 (defcustom gcloud-gcs-cache-file
   (expand-file-name "gcs.cache" user-emacs-directory)
@@ -40,7 +40,7 @@
   :group 'gcloud)
 
 (defun gcloud-gsutil-ls (dir)
-  "Lists a particular directory"
+  "List files in `DIR'."
   (let ((command (format "%s ls gs://%s" gcloud-gsutil-command dir)))
     (shell-command-to-string command)))
 
@@ -64,28 +64,39 @@
                  (gethash dir gcloud-gcs-cache)))
          (lines (s-split "\n" data t)))
     (puthash dir data gcloud-gcs-cache)
-    (-map #'gcloud-gcs-lines-parse lines)))
+    (-select (lambda (entry)
+               (not (equal (aref (cadr entry) 0) "")))
+             (-map #'gcloud-gcs-lines-parse lines))))
 
 (defun gcloud-gcs-entries ()
   "List GCS entries."
   (interactive)
   (pop-to-buffer "*gcs*")
   (gcloud-gcs-mode)
-  (tablist-revert))
+  (gcloud-gcs-entries-refresh)
+  (tabulated-list-revert))
 
-(defun gcloud-gcs-entries-refresh (&optional refresh)
+(defun gcloud-gcs-entries-refresh ()
   "Refresh the entries shown in the tablist."
   (interactive)
   (setq tabulated-list-entries
-        (gcloud-gcs-get-entries gcloud-current-directory refresh)))
+        (gcloud-gcs-get-entries gcloud-current-directory))
+  (tabulated-list-revert))
+
+(defun gcloud-gcs-entries-reload ()
+  "Reload the entries shown in the tablist."
+  (interactive)
+  (message "Reloading %s..." gcloud-current-directory)
+  (setq tabulated-list-entries
+        (gcloud-gcs-get-entries gcloud-current-directory t))
+  (tabulated-list-revert))
 
 (defun gcloud-gcs-select-directory ()
   "Update the selected gcloud directory to current entry."
   (interactive)
   (let* ((dir (tabulated-list-get-id)))
     (setq gcloud-current-directory dir)
-    (gcloud-gcs-entries-refresh)
-    (tabulated-list-revert)))
+    (gcloud-gcs-entries-refresh)))
 
 (defun gcloud-gcs-parent-directory ()
   "Update the selected gloud directory to parent directory."
@@ -93,8 +104,7 @@
   (let* ((parent (or (file-name-directory (directory-file-name gcloud-current-directory))
                      "/")))
     (setq gcloud-current-directory parent)
-    (gcloud-gcs-entries-refresh)
-    (tabulated-list-revert)))
+    (gcloud-gcs-entries-refresh)))
 
 (defun gcloud-gcs-save-cache ()
   "Serialize cache for later usage."
@@ -119,7 +129,7 @@ POS, if omitted or nil, defaults to point."
 (defvar gcloud-gcs-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "<return>") 'gcloud-gcs-select-directory)
-    (define-key map (kbd "G") 'gcloud-gcs-entries-refresh)
+    (define-key map (kbd "G") 'gcloud-gcs-entries-reload)
     (define-key map (kbd "w") 'gcloud-gcs-add-to-killring)
     (define-key map (kbd "^") 'gcloud-gcs-parent-directory)
     (define-key map (kbd "s") 'gcloud-gcs-save-cache)
@@ -136,16 +146,7 @@ POS, if omitted or nil, defaults to point."
               (make-hash-table :test 'equal))))
   (defvar-local gcloud-current-directory "/"
     "Current bucket being browsed.")
-  (tabulated-list-init-header)
-  (tablist-minor-mode)
-  (add-hook 'gcloud-gcs-mode-hook
-            (lambda ()
-              (let ((oldmap (cdr (assoc '<minor-mode> minor-mode-map-alist)))
-                    (newmap (make-sparse-keymap)))
-                (set-keymap-parent newmap oldmap)
-                (define-key newmap (kbd "G") nil)
-                (make-local-variable 'minor-mode-overriding-map-alist)
-                (push `(<minor-mode> . ,newmap) minor-mode-overriding-map-alist)))))
+  (tabulated-list-init-header))
 
 (provide 'gcloud-gcs)
 
